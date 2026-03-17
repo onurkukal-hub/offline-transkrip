@@ -8,7 +8,7 @@
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="Offline Transkript"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        android:theme="@style/Theme.OfflineTranskript"
 
         <activity
             android:name=".MainActivity"
