@@ -111,15 +111,16 @@ class MainActivity : AppCompatActivity() {
                     val recognizer = Recognizer(model, decoded.sampleRate.toFloat())
                     val chunkSize = 4000
                     var offset = 0
-                    while (offset < decoded.pcmData.size) {
-                        val remaining = decoded.pcmData.size - offset
-                        val len = minOf(chunkSize, remaining)
-                        recognizer.acceptWaveForm(decoded.pcmData, offset, len)
-                        offset += len
-                    }
-                    val finalJson = recognizer.finalResult
-                    recognizer.close()
-                    parseTextFromVoskJson(finalJson)
+                   var offset = 0
+while (offset < audioBytes.size) {
+    val len = minOf(4096, audioBytes.size - offset)
+    val chunk = audioBytes.copyOfRange(offset, offset + len)
+    recognizer.acceptWaveForm(chunk, len)
+    offset += len
+}
+val finalJson = recognizer.finalResult
+recognizer.close()
+parseTextFromVoskJson(finalJson)
                 }
                 binding.etTranscript.setText(result.ifBlank { "Metin üretilemedi." })
                 binding.btnSaveTxt.isEnabled = result.isNotBlank()
