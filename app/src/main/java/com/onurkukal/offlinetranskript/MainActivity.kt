@@ -1,9 +1,6 @@
 package com.onurkukal.offlinetranskript
 
 import android.content.ContentValues
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -17,8 +14,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import org.vosk.LibVosk
-import org.vosk.LogLevel
 import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.ByteArrayOutputStream
@@ -29,6 +24,9 @@ import java.nio.ByteOrder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 
 class MainActivity : AppCompatActivity() {
 
@@ -45,23 +43,34 @@ class MainActivity : AppCompatActivity() {
                         android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                     )
                 } catch (_: Exception) {
-                    // Bazı sağlayıcılarda persistable permission verilmeyebilir.
                 }
 
                 selectedAudioUri = uri
                 binding.tvSelectedFile.text =
                     "Seçilen dosya: ${queryDisplayName(uri) ?: uri.lastPathSegment ?: "-"}"
+                binding.btnTranscribe.isEnabled = true
             }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
 
-        LibVosk.setLogLevel(LogLevel.INFO)
+        try {
+            binding = ActivityMainBinding.inflate(layoutInflater)
+            setContentView(binding.root)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Açılış hatası: ${e.message}", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
         binding.btnTranscribe.isEnabled = false
         binding.btnSaveTxt.isEnabled = false
+
+        if (::binding.isInitialized) {
+            binding.tvModelStatus.text =
+                "Offline mod hazır.\nModel yükleme yalnızca transkript başlatılınca denenecek."
+        }
 
         binding.btnPickAudio.setOnClickListener {
             pickAudioLauncher.launch(arrayOf("audio/*"))
@@ -79,56 +88,21 @@ class MainActivity : AppCompatActivity() {
         binding.btnSaveTxt.setOnClickListener {
             saveTranscriptToDownloads(binding.etTranscript.text.toString())
         }
-
-        loadModelIfPresent()
-    }
-
-    private fun loadModelIfPresent() {
-        lifecycleScope.launch {
-            val modelDir = File(filesDir, "model-tr")
-
-            if (!modelDir.exists()) {
-                binding.tvModelStatus.text =
-                    "Model bulunamadı.\n\n" +
-                        "Kurulum: README içindeki bağlantıdan Türkçe Vosk modelini indirip " +
-                        "uygulamanın model-tr klasörüne ekleyin.\n\n" +
-                        "Not: Bu paket model dosyasını boyut nedeniyle içermiyor."
-                binding.btnTranscribe.isEnabled = false
-                return@launch
-            }
-
-            try {
-                withContext(Dispatchers.IO) {
-                    voskModel?.close()
-                    voskModel = Model(modelDir.absolutePath)
-                }
-                binding.tvModelStatus.text = "Model hazır: ${modelDir.absolutePath}"
-                binding.btnTranscribe.isEnabled = true
-            } catch (e: Exception) {
-                binding.tvModelStatus.text = "Model yüklenemedi: ${e.message}"
-                binding.btnTranscribe.isEnabled = false
-            }
-        }
     }
 
     private fun transcribeOffline(uri: Uri) {
-        val model = voskModel
-        if (model == null) {
-            toast("Önce model klasörünü ekleyin")
-            return
-        }
-
         lifecycleScope.launch {
             setBusy(true)
             try {
                 val result = withContext(Dispatchers.IO) {
+                    val model = ensureModelLoaded()
                     val decoded = AudioDecoder.decodeToMono16BitPcm(contentResolver, uri)
-
                     val recognizer = Recognizer(model, decoded.sampleRate.toFloat())
+
                     val pcmBytes = decoded.pcmData
                     val chunkSize = 4096
-
                     var offset = 0
+
                     while (offset < pcmBytes.size) {
                         val len = minOf(chunkSize, pcmBytes.size - offset)
                         val chunk = pcmBytes.copyOfRange(offset, offset + len)
@@ -152,6 +126,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun ensureModelLoaded(): Model {
+        voskModel?.let { return it }
+
+        val modelDir = File(filesDir, "model-tr")
+        if (!modelDir.exists()) {
+            throw IOException(
+                "Model bulunamadı. Telefon içinde uygulamanın files/model-tr klasörüne Türkçe Vosk modeli eklenmeli."
+            )
+        }
+
+        val model = Model(modelDir.absolutePath)
+        voskModel = model
+        return model
+    }
+
     private fun parseTextFromVoskJson(json: String): String {
         return try {
             JSONObject(json).optString("text", "")
@@ -166,9 +155,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val fileName = "transkript_${
-            SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        }.txt"
+        val fileName =
+            "transkript_${
+                SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            }.txt"
 
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -209,12 +199,21 @@ class MainActivity : AppCompatActivity() {
         binding.progressBar.visibility =
             if (busy) android.view.View.VISIBLE else android.view.View.GONE
         binding.btnPickAudio.isEnabled = !busy
-        binding.btnTranscribe.isEnabled = !busy && voskModel != null
+        binding.btnTranscribe.isEnabled = !busy && selectedAudioUri != null
         binding.btnSaveTxt.isEnabled = !busy && binding.etTranscript.text?.isNotBlank() == true
     }
 
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            voskModel?.close()
+        } catch (_: Exception) {
+        }
+        voskModel = null
     }
 }
 
@@ -338,7 +337,6 @@ object AudioDecoder {
                 }
 
                 outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    // Dinamik format değişimi burada ayrıca ele alınmıyor.
                 }
             }
         }
