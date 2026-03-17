@@ -6,7 +6,7 @@
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="Offline Transkript"
         android:supportsRtl="true"
-        android:theme="@style/Theme.OfflineTranskript">
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar"
         <activity
             android:name=".MainActivity"
             android:exported="true">
